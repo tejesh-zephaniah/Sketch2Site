@@ -127,8 +127,8 @@ function formatBytes(bytes) {
 export default function App() {
   const inputRef = useRef(null);
   const previewUrlRef = useRef(null);
-  const [file, setFile] = useState(null);
-  const [imageUrl, setImageUrl] = useState("");
+  const imageUrlsRef = useRef(new Set());
+  const [images, setImages] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [html, setHtml] = useState("");
@@ -141,52 +141,71 @@ export default function App() {
   const activeCode = activeTab === "html" ? html : css;
 
   useEffect(() => {
+    const imageUrls = imageUrlsRef.current;
     return () => {
       if (previewUrlRef.current) {
         URL.revokeObjectURL(previewUrlRef.current);
       }
+      imageUrls.forEach((url) => URL.revokeObjectURL(url));
     };
   }, []);
 
-  function selectFile(selectedFile) {
-    if (!selectedFile) return;
-
+  function selectFiles(selectedFiles) {
+    if (!selectedFiles?.length) return;
     setError("");
 
-    if (!selectedFile.type.startsWith("image/")) {
-      setError("Please choose an image file such as PNG, JPG, or WEBP.");
-      return;
-    }
-
     const allowedTypes = ["image/png", "image/jpeg", "image/webp"];
-    if (!allowedTypes.includes(selectedFile.type)) {
-      setError("Supported image formats are PNG, JPG, and WEBP.");
-      return;
-    }
+    const nextImages = [];
+    const errors = [];
 
-    if (selectedFile.size > 10 * 1024 * 1024) {
-      setError("Your image is too large. Please choose an image under 10 MB.");
-      return;
-    }
+    Array.from(selectedFiles).forEach((selectedFile) => {
+      if (!selectedFile.type.startsWith("image/")) {
+        errors.push("Please choose image files such as PNG, JPG, or WEBP.");
+        return;
+      }
 
-    setFile(selectedFile);
+      if (!allowedTypes.includes(selectedFile.type)) {
+        errors.push("Supported image formats are PNG, JPG, and WEBP.");
+        return;
+      }
+
+      if (selectedFile.size > 10 * 1024 * 1024) {
+        errors.push(`${selectedFile.name} is too large. Choose images under 10 MB each.`);
+        return;
+      }
+
+      const url = URL.createObjectURL(selectedFile);
+      imageUrlsRef.current.add(url);
+      nextImages.push({ file: selectedFile, url });
+    });
+
+    if (errors.length) setError(errors[0]);
+    if (!nextImages.length) return;
+
+    setImages((currentImages) => [...currentImages, ...nextImages]);
     setHasGenerated(false);
     setHtml("");
     setCss("");
-
-    if (imageUrl) {
-      URL.revokeObjectURL(imageUrl);
-    }
-
-    const nextUrl = URL.createObjectURL(selectedFile);
-    setImageUrl(nextUrl);
     setActiveTab("html");
   }
 
-  function removeFile() {
-    if (imageUrl) URL.revokeObjectURL(imageUrl);
-    setFile(null);
-    setImageUrl("");
+  function removeImage(imageUrl) {
+    URL.revokeObjectURL(imageUrl);
+    imageUrlsRef.current.delete(imageUrl);
+    setImages((currentImages) =>
+      currentImages.filter((image) => image.url !== imageUrl)
+    );
+    setHtml("");
+    setCss("");
+    setHasGenerated(false);
+  }
+
+  function removeAllImages() {
+    images.forEach(({ url }) => {
+      URL.revokeObjectURL(url);
+      imageUrlsRef.current.delete(url);
+    });
+    setImages([]);
     setHtml("");
     setCss("");
     setError("");
@@ -197,11 +216,11 @@ export default function App() {
   function handleDrop(event) {
     event.preventDefault();
     setIsDragging(false);
-    selectFile(event.dataTransfer.files?.[0]);
+    selectFiles(event.dataTransfer.files);
   }
 
   async function generateWebsite() {
-    if (!file || isGenerating) return;
+    if (!images.length || isGenerating) return;
 
     setIsGenerating(true);
     setError("");
@@ -211,7 +230,10 @@ export default function App() {
 
     try {
       const formData = new FormData();
-      formData.append("image", file);
+      formData.append("image", images[0].file);
+      images.forEach(({ file: selectedFile }) => {
+        formData.append("images", selectedFile);
+      });
 
       const response = await fetch(API_URL, {
         method: "POST",
@@ -346,7 +368,7 @@ ${html}
           <button
             className="button button-primary top-button"
             onClick={generateWebsite}
-            disabled={!file || isGenerating}
+            disabled={!images.length || isGenerating}
             type="button"
           >
             {isGenerating ? (
@@ -374,14 +396,14 @@ ${html}
             </h1>
 
             <p>
-              Turn your hand-drawn designs into clean HTML and CSS. Upload a
-              sketch and let AI bring your ideas to life.
+              Turn your hand-drawn designs into clean HTML and CSS. Upload
+              sketches and let AI bring your ideas to life.
             </p>
           </div>
 
           <section
             className={`upload-card${isDragging ? " is-dragging" : ""}${
-              file ? " has-file" : ""
+              images.length ? " has-file" : ""
             }`}
             onDragEnter={(event) => {
               event.preventDefault();
@@ -399,41 +421,72 @@ ${html}
               ref={inputRef}
               type="file"
               accept="image/png,image/jpeg,image/webp"
+              multiple
               hidden
-              onChange={(event) => selectFile(event.target.files?.[0])}
+              onChange={(event) => {
+                selectFiles(event.target.files);
+                event.target.value = "";
+              }}
             />
 
-            {file ? (
-              <div className="selected-file">
-                <div className="image-preview">
-                  <img src={imageUrl} alt="Selected sketch preview" />
+            {images.length ? (
+              <div className="selected-images">
+                <div
+                  className={`selected-files${
+                    images.length === 1 ? " single-file" : ""
+                  }`}
+                >
+                  {images.map(({ file, url }, index) => (
+                    <div className="selected-file" key={url}>
+                      <div className="image-preview">
+                        <img
+                          src={url}
+                          alt={`Selected sketch ${index + 1}: ${file.name}`}
+                        />
+                      </div>
+
+                      <div className="file-details">
+                        <div className="file-type">
+                          <Icon name="check" size={13} />
+                          IMAGE {String(index + 1).padStart(2, "0")} READY
+                        </div>
+                        <h2>{file.name}</h2>
+                        <p>{formatBytes(file.size)} · Ready to convert</p>
+
+                        <div className="file-actions">
+                          <button
+                            type="button"
+                            className="text-button remove-button"
+                            onClick={() => removeImage(url)}
+                          >
+                            <Icon name="trash" size={13} />
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
 
-                <div className="file-details">
-                  <div className="file-type">
-                    <Icon name="check" size={13} />
-                    IMAGE READY
-                  </div>
-                  <h2>{file.name}</h2>
-                  <p>{formatBytes(file.size)} · Ready to convert</p>
-
-                  <div className="file-actions">
-                    <button
-                      type="button"
-                      className="text-button"
-                      onClick={() => inputRef.current?.click()}
-                    >
-                      Change image
-                    </button>
-                    <button
-                      type="button"
-                      className="text-button remove-button"
-                      onClick={removeFile}
-                    >
-                      <Icon name="trash" size={13} />
-                      Remove
-                    </button>
-                  </div>
+                <div className="file-actions selected-images-actions">
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => inputRef.current?.click()}
+                  >
+                    + Add more images
+                  </button>
+                  <button
+                    type="button"
+                    className="text-button remove-button"
+                    onClick={removeAllImages}
+                  >
+                    <Icon name="trash" size={13} />
+                    Remove all
+                  </button>
+                  <span className="image-count">
+                    {images.length} {images.length === 1 ? "image" : "images"} selected
+                  </span>
                 </div>
               </div>
             ) : (
@@ -451,15 +504,15 @@ ${html}
                 </span>
 
                 <span className="dropzone-title">
-                  {isDragging ? "Drop your sketch here" : "Upload your sketch"}
+                  {isDragging ? "Drop your images here" : "Upload your sketches"}
                 </span>
                 <span className="dropzone-description">
-                  Drag and drop your image, or{" "}
+                  Drag and drop images, or{" "}
                   <span className="inline-link">browse files</span>
                 </span>
                 <span className="file-format">
                   <span>PNG</span> · <span>JPG</span> · <span>WEBP</span>
-                  &nbsp; up to 10 MB
+                  &nbsp; up to 10 MB each
                 </span>
               </button>
             )}
@@ -477,7 +530,7 @@ ${html}
             className="button button-primary generate-button"
             type="button"
             onClick={generateWebsite}
-            disabled={!file || isGenerating}
+            disabled={!images.length || isGenerating}
           >
             {isGenerating ? (
               <>
@@ -529,7 +582,7 @@ ${html}
 
             <div className="status-stages">
               {[
-                { label: "Upload sketch", done: Boolean(file) },
+                { label: "Upload images", done: Boolean(images.length) },
                 { label: "AI analysis", done: hasGenerated, active: isGenerating },
                 { label: "Generate code", done: hasGenerated },
                 { label: "Ready to run", done: hasGenerated },
@@ -573,9 +626,9 @@ ${html}
                 ? "Your code is ready. Review it and open your website."
                 : isGenerating
                   ? "Gemma AI is processing your sketch and generating the website code."
-                  : file
-                    ? "Your image is ready. Generate the website to begin."
-                    : "Upload a sketch to begin your conversion."}
+                  : images.length
+                    ? `${images.length} ${images.length === 1 ? "image is" : "images are"} ready. Generate the website to begin.`
+                    : "Upload sketches to begin your conversion."}
             </p>
           </section>
 
