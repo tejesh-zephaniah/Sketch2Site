@@ -7,9 +7,17 @@ require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const configuredFrontendUrl = process.env.FRONTEND_URL;
+const frontendOrigin = configuredFrontendUrl
+  ? new URL(
+      configuredFrontendUrl.startsWith("http")
+        ? configuredFrontendUrl
+        : `https://${configuredFrontendUrl}`
+    ).origin
+  : null;
 
 app.use(cors({
-  origin: "http://localhost:5173"
+  origin: ["http://localhost:5173", ...(frontendOrigin ? [frontendOrigin] : [])]
 }));
 app.use(express.json());
 

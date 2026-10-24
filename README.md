@@ -51,6 +51,15 @@ npm install
 npm run dev
 ```
 
+### Deploy to Render
+
+1. Push this repository to GitHub.
+2. In Render, choose **New > Blueprint** and connect this repository. Render will read `render.yaml` and create the frontend and backend services.
+3. Enter your `GEMINI_API_KEY` when prompted for the backend service. Do not commit the key to the repository.
+4. Wait for both services to finish deploying, then open the frontend service URL.
+
+The frontend and backend URLs are linked by the Blueprint. The free backend service may take a little time to wake up after inactivity.
+
 ## 🎯 Goal
 
 To bridge the gap between imagination and implementation by transforming hand-drawn website ideas into code, making web development faster, easier, and more accessible.
