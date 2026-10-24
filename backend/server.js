@@ -15,7 +15,7 @@ app.use(express.json());
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024, files: 6 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = [
       "image/png",
@@ -39,30 +39,37 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "OK" });
 });
 
-app.post("/api/generate", upload.single("image"), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({
-        error: "Please upload an image in the 'image' field."
+app.post(
+  "/api/generate",
+  upload.fields([
+    { name: "images", maxCount: 5 },
+    { name: "image", maxCount: 1 }
+  ]),
+  async (req, res) => {
+    try {
+      const images = req.files?.images?.length
+        ? req.files.images
+        : req.files?.image || [];
+
+      if (!images.length) {
+        return res.status(400).json({
+          error: "Please upload at least one image in the 'images' or 'image' field."
+        });
+      }
+
+      if (!process.env.GEMINI_API_KEY) {
+        return res.status(500).json({
+          error: "Gemini API key is not configured in backend/.env."
+        });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY
       });
-    }
 
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({
-        error: "Gemini API key is not configured in backend/.env."
-      });
-    }
-
-    const ai = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY
-    });
-
-    const imageBase64 = req.file.buffer.toString("base64");
-
-    const prompt = `
+      const prompt = `
 You are an expert frontend developer.
-Analyze the uploaded hand-drawn website wireframe.
-Convert it into a clean, responsive website using HTML and CSS.
+Treat all uploaded hand-drawn references as wireframes for the content, layout, and relationships. Combine them into ONE cohesive, polished, responsive website. Treat different page-like sketches as views of that same website, with connected navigation. Do not create separate HTML documents or websites.
 
 Return ONLY valid JSON with exactly these two string fields:
 {
@@ -71,60 +78,69 @@ Return ONLY valid JSON with exactly these two string fields:
 }
 
 Requirements:
-- Recreate the layout and visible elements in the drawing.
+- Preserve the intended content, hierarchy, and important layout ideas, but do not copy the sketch's rough appearance.
+- Interpret handwritten labels as text content; render them with clear, professional web typography, not handwriting-style fonts.
+- Transform monochrome sketches into a finished, visually appealing website with a thoughtful color palette, strong contrast, polished spacing, and subtle styling. Use black and white only when clearly appropriate to the design.
+- Use a consistent, professional font stack and responsive visual hierarchy.
+- Make navigation links such as Home, About, Info, and Menu switch to distinct page-like views within the same HTML document and browser tab, rather than merely scrolling to sections or opening new tabs.
+- Use small inline JavaScript in the html field for client-side view switching, keeping every view in this single document and supporting browser back/forward navigation.
 - Use semantic HTML and responsive CSS.
 - Put CSS only in the css field.
 - Do not include Markdown fences.
-- Do not include JavaScript.
 - Do not add explanations outside the JSON.
 - Do not include external libraries.
 `;
 
-    const response = await ai.models.generateContent({
-      model: "gemma-4-26b-a4b-it",
-      contents: [
-        { text: prompt },
-        {
-          inlineData: {
-            mimeType: req.file.mimetype,
-            data: imageBase64
-          }
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash-lite",
+        contents: [
+          { text: prompt },
+          ...images.map((image) => ({
+            inlineData: {
+              mimeType: image.mimetype,
+              data: image.buffer.toString("base64")
+            }
+          }))
+        ],
+        config: {
+          responseMimeType: "application/json"
         }
-      ],
-      config: {
-        responseMimeType: "application/json"
+      });
+
+      const result = JSON.parse(response.text);
+
+      if (
+        typeof result.html !== "string" ||
+        !result.html.trim() ||
+        typeof result.css !== "string"
+      ) {
+        throw new Error("AI response did not contain valid html and css strings.");
       }
-    });
 
-    const result = JSON.parse(response.text);
+      return res.json({
+        html: result.html,
+        css: result.css
+      });
 
-    if (
-      typeof result.html !== "string" ||
-      typeof result.css !== "string"
-    ) {
-      throw new Error("AI response did not contain valid html and css strings.");
+    } catch (error) {
+      console.error("Generation error:", error.message);
+
+      return res.status(500).json({
+        error: "Failed to generate HTML and CSS. Check the API key, model availability, and API quota."
+      });
     }
-
-    return res.json({
-      html: result.html,
-      css: result.css
-    });
-
-  } catch (error) {
-    console.error("Generation error:", error.message);
-
-    return res.status(500).json({
-      error: "Failed to generate HTML and CSS. Check the API key, model availability, and API quota."
-    });
   }
-});
+);
 
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     return res.status(400).json({
       error: err.code === "LIMIT_FILE_SIZE"
-        ? "Image must be 5 MB or smaller."
-        : err.message
+        ? "Each image must be 10 MB or smaller."
+        : err.code === "LIMIT_FILE_COUNT" ||
+            err.code === "LIMIT_UNEXPECTED_FILE"
+          ? "Upload no more than 5 images."
+          : err.message
     });
   }
 
