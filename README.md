@@ -2,6 +2,15 @@
 
 **From Sketch to Website – Instantly!**
 
+<p align="center">
+  <img
+    src="assets/sketch2site-banner.png"
+    alt="Sketch2Site - From Sketch to Website"
+    width="100%"
+  />
+</p>
+
+
 Sketch2Site is an AI-powered web application that converts hand-drawn website sketches and wireframes into functional HTML and CSS code.
 
 Simply upload your drawing (or multiple reference images), and the application analyzes the design to generate a website layout inspired by your sketches.
