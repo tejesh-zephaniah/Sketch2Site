@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
-const API_URL = "http://localhost:8000/api/generate";
+const API_URL = "http://localhost:5000/api/generate";
 
 function Icon({ name, size = 18, ...props }) {
   const common = {
